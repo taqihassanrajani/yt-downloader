@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 const VideoIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -14,21 +14,11 @@ const MusicIcon = () => (
 );
 const DownloadIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
   </svg>
 );
-const InfoIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-  </svg>
-);
-
-const QUALITY_ORDER = ['2160p','1440p','1080p','720p','480p','360p','240p','144p'];
-function qualityRank(q = '') {
-  const match = q.match(/(\d+)p/);
-  if (!match) return 999;
-  return QUALITY_ORDER.indexOf(`${parseInt(match[1])}p`);
-}
 
 function formatSize(bytes) {
   if (!bytes) return null;
@@ -42,7 +32,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  const [showMergeHint, setShowMergeHint] = useState(false);
+  const [mergeState, setMergeState] = useState({ active: false, progress: 0, label: '' });
+  const ffmpegRef = useRef(null);
 
   async function handleFetch() {
     if (!input.trim()) return;
@@ -56,11 +47,62 @@ export default function Home() {
     finally { setLoading(false); }
   }
 
-  const sortedVideos = [...(result?.videos || [])].sort((a, b) => qualityRank(a.quality) - qualityRank(b.quality));
-  const videoWithAudio = sortedVideos.filter(v => v.hasAudio !== false);
-  const videoOnly = sortedVideos.filter(v => v.hasAudio === false);
-  const audios = result?.audios || [];
-  const bestAudio = audios[0] || null;
+  // Client-side merge with ffmpeg.wasm (no server, no COEP headers needed with single-thread core)
+  async function handleMerge720p(videoUrl, audioUrl, title) {
+    setMergeState({ active: true, progress: 5, label: 'Loading ffmpeg…' });
+    try {
+      const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+      const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
+
+      if (!ffmpegRef.current) {
+        const ff = new FFmpeg();
+        ff.on('progress', ({ progress }) => {
+          setMergeState(s => ({ ...s, progress: Math.min(95, 50 + Math.round(progress * 45)), label: 'Merging…' }));
+        });
+        // Single-threaded core — no SharedArrayBuffer / COEP needed
+        const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+        await ff.load({
+          coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+        });
+        ffmpegRef.current = ff;
+      }
+
+      const ff = ffmpegRef.current;
+      setMergeState({ active: true, progress: 20, label: 'Downloading video…' });
+      await ff.writeFile('v.mp4', await fetchFile(videoUrl));
+
+      setMergeState({ active: true, progress: 40, label: 'Downloading audio…' });
+      await ff.writeFile('a.m4a', await fetchFile(audioUrl));
+
+      setMergeState({ active: true, progress: 50, label: 'Merging…' });
+      await ff.exec(['-i', 'v.mp4', '-i', 'a.m4a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'out.mp4']);
+
+      setMergeState({ active: true, progress: 97, label: 'Preparing download…' });
+      const fileData = await ff.readFile('out.mp4');
+      const blob = new Blob([fileData.buffer], { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(title || 'video').slice(0, 60)}-720p.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // Cleanup
+      await ff.deleteFile('v.mp4').catch(() => {});
+      await ff.deleteFile('a.m4a').catch(() => {});
+      await ff.deleteFile('out.mp4').catch(() => {});
+
+      setMergeState({ active: true, progress: 100, label: 'Done!' });
+      setTimeout(() => setMergeState({ active: false, progress: 0, label: '' }), 2000);
+    } catch (err) {
+      setError('Merge failed: ' + err.message);
+      setMergeState({ active: false, progress: 0, label: '' });
+    }
+  }
+
+  const video720 = result?.videos?.find(v => v.quality === '720p');
+  const video360 = result?.videos?.find(v => v.quality === '360p');
+  const audio    = result?.audios?.[0];
 
   return (
     <>
@@ -104,6 +146,7 @@ export default function Home() {
 
           {result && !loading && (
             <div className="result-card">
+              {/* Video info */}
               <div className="video-info">
                 <div className="thumbnail-wrap">
                   <img src={result.thumbnail} alt={result.title} />
@@ -112,124 +155,80 @@ export default function Home() {
                 <div className="video-meta">
                   <h2>{result.title}</h2>
                   <div className="meta-row">
-                    {result.channel && <span className="meta-tag">📺 {result.channel}</span>}
-                    {result.views && <span className="meta-tag">👁 {result.views}</span>}
+                    {result.channel  && <span className="meta-tag">📺 {result.channel}</span>}
+                    {result.views    && <span className="meta-tag">👁 {result.views}</span>}
                     {result.duration && <span className="meta-tag">⏱ {result.duration}</span>}
                   </div>
                 </div>
               </div>
 
-              {/* HIGH QUALITY — video-only streams paired with audio */}
-              {videoOnly.length > 0 && (
-                <>
-                  <div className="section-label">
-                    <span>High Quality — 720p / 1080p+</span>
-                    <button className="info-btn" onClick={() => setShowMergeHint(h => !h)} title="How to merge?">
-                      <InfoIcon /> How to merge?
-                    </button>
-                  </div>
+              <div className="section-label"><span>Download</span></div>
+              <div className="download-list">
 
-                  {showMergeHint && (
-                    <div className="merge-hint">
-                      <strong>📌 Why two downloads?</strong> YouTube separates 720p+ video from audio. Download <em>both</em> files, then merge them free online:<br />
-                      <a href="https://www.veed.io/tools/video-merger" target="_blank" rel="noopener noreferrer">→ VEED.io merger</a>
-                      &nbsp;·&nbsp;
-                      <a href="https://clideo.com/merge-video" target="_blank" rel="noopener noreferrer">→ Clideo</a>
-                      &nbsp;·&nbsp;
-                      Or use VLC: <em>Media → Convert/Save → Add both files → Profile: MP4</em>
+                {/* 720p — browser merge */}
+                {video720 && result.mergeAudioUrl && (
+                  <div className="download-item">
+                    <div className="item-info">
+                      <div className="item-icon video"><VideoIcon /></div>
+                      <div>
+                        <div className="item-label">720p HD — MP4 <span className="inline-badge">Full Video + Audio</span></div>
+                        <div className="item-sub">MP4{video720.size ? ` · ${formatSize(video720.size)}` : ''}</div>
+                      </div>
                     </div>
-                  )}
-
-                  <div className="download-list">
-                    {videoOnly.map((v, i) => (
-                      <div key={i} className="hq-block">
-                        <div className="hq-label">
-                          <span className="quality-badge">{v.quality}</span>
-                          <span className="hq-note">Download both ↓ then merge</span>
+                    {mergeState.active ? (
+                      <div className="merge-progress-wrap">
+                        <div className="merge-bar">
+                          <div className="merge-fill" style={{ width: mergeState.progress + '%' }} />
                         </div>
-                        <div className="hq-row">
-                          <div className="download-item hq-item">
-                            <div className="item-info">
-                              <div className="item-icon video"><VideoIcon /></div>
-                              <div>
-                                <div className="item-label">{v.quality} Video</div>
-                                <div className="item-sub">{v.extension?.toUpperCase()}{v.size ? ` · ${formatSize(v.size)}` : ''}</div>
-                              </div>
-                            </div>
-                            <a className="btn-dl" href={v.url} target="_blank" rel="noopener noreferrer" download>
-                              <DownloadIcon /> Video
-                            </a>
-                          </div>
-                          {bestAudio && (
-                            <div className="download-item hq-item">
-                              <div className="item-info">
-                                <div className="item-icon audio"><MusicIcon /></div>
-                                <div>
-                                  <div className="item-label">Best Audio</div>
-                                  <div className="item-sub">{bestAudio.extension?.toUpperCase()}{bestAudio.size ? ` · ${formatSize(bestAudio.size)}` : ''}</div>
-                                </div>
-                              </div>
-                              <a className="btn-dl audio-dl" href={bestAudio.url} target="_blank" rel="noopener noreferrer" download>
-                                <DownloadIcon /> Audio
-                              </a>
-                            </div>
-                          )}
-                        </div>
+                        <span className="merge-label">{mergeState.label} {mergeState.progress < 100 ? mergeState.progress + '%' : '✓'}</span>
                       </div>
-                    ))}
+                    ) : (
+                      <button
+                        className="btn-dl"
+                        onClick={() => handleMerge720p(video720.url, result.mergeAudioUrl, result.title)}
+                      >
+                        <DownloadIcon /> Download
+                      </button>
+                    )}
                   </div>
-                </>
-              )}
+                )}
 
-              {/* READY TO PLAY */}
-              {videoWithAudio.length > 0 && (
-                <>
-                  <div className="section-label"><span>Ready to Play — Video + Audio</span></div>
-                  <div className="download-list">
-                    {videoWithAudio.map((v, i) => (
-                      <div className="download-item" key={i}>
-                        <div className="item-info">
-                          <div className="item-icon video"><VideoIcon /></div>
-                          <div>
-                            <div className="item-label">{v.quality}</div>
-                            <div className="item-sub">{v.extension?.toUpperCase()}{v.size ? ` · ${formatSize(v.size)}` : ''}</div>
-                          </div>
-                        </div>
-                        <a className="btn-dl" href={v.url} target="_blank" rel="noopener noreferrer" download>
-                          <DownloadIcon /> Download
-                        </a>
+                {/* 360p — direct single file */}
+                {video360 && (
+                  <div className="download-item">
+                    <div className="item-info">
+                      <div className="item-icon video"><VideoIcon /></div>
+                      <div>
+                        <div className="item-label">360p — MP4 <span className="inline-badge">Ready to Play</span></div>
+                        <div className="item-sub">MP4{video360.size ? ` · ${formatSize(video360.size)}` : ''}</div>
                       </div>
-                    ))}
+                    </div>
+                    <a className="btn-dl" href={video360.url} target="_blank" rel="noopener noreferrer" download>
+                      <DownloadIcon /> Download
+                    </a>
                   </div>
-                </>
-              )}
+                )}
 
-              {/* AUDIO ONLY */}
-              {audios.length > 0 && (
-                <>
-                  <div className="section-label"><span>Audio Only</span></div>
-                  <div className="download-list">
-                    {audios.map((a, i) => (
-                      <div className="download-item" key={i}>
-                        <div className="item-info">
-                          <div className="item-icon audio"><MusicIcon /></div>
-                          <div>
-                            <div className="item-label">{a.quality}</div>
-                            <div className="item-sub">{a.extension?.toUpperCase()}{a.size ? ` · ${formatSize(a.size)}` : ''}</div>
-                          </div>
-                        </div>
-                        <a className="btn-dl audio-dl" href={a.url} target="_blank" rel="noopener noreferrer" download>
-                          <DownloadIcon /> Download
-                        </a>
+                {/* Audio MP3 */}
+                {audio && (
+                  <div className="download-item">
+                    <div className="item-info">
+                      <div className="item-icon audio"><MusicIcon /></div>
+                      <div>
+                        <div className="item-label">Audio — MP3</div>
+                        <div className="item-sub">{audio.extension?.toUpperCase()}{audio.size ? ` · ${formatSize(audio.size)}` : ''}</div>
                       </div>
-                    ))}
+                    </div>
+                    <a className="btn-dl audio-dl" href={audio.url} target="_blank" rel="noopener noreferrer" download>
+                      <DownloadIcon /> Download
+                    </a>
                   </div>
-                </>
-              )}
+                )}
 
-              {videoWithAudio.length === 0 && videoOnly.length === 0 && audios.length === 0 && (
-                <div className="no-formats">No downloadable formats found for this video.</div>
-              )}
+                {!video720 && !video360 && !audio && (
+                  <div className="no-formats">No downloadable formats found.</div>
+                )}
+              </div>
             </div>
           )}
         </div>

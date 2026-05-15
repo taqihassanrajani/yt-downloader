@@ -502,6 +502,53 @@ html, body {
   color: var(--blue) !important;
 }
 
+/* Inline badge */
+.inline-badge {
+  font-size: 0.68rem;
+  font-family: var(--mono);
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(255,45,45,0.2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Merge progress */
+.merge-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 130px;
+}
+.merge-bar {
+  width: 130px;
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.merge-fill {
+  height: 100%;
+  background: var(--red);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.merge-label {
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  color: var(--text-muted);
+}
+
+/* Audio button */
+.audio-dl:hover {
+  background: rgba(59,130,246,0.12) !important;
+  border-color: var(--blue) !important;
+  color: var(--blue) !important;
+}
+
 /* Responsive */
 @media (max-width: 520px) {
   .video-info {
