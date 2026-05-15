@@ -1,5 +1,3 @@
-export const runtime = 'edge';
-
 function extractVideoId(input) {
   input = input.trim();
   // Plain video ID (11 chars)
@@ -56,13 +54,16 @@ export async function GET(request) {
           'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com',
           'x-rapidapi-key': apiKey,
         },
-        // Cache for 5 minutes to save API credits
-        next: { revalidate: 300 },
+
       }
     );
 
     if (!res.ok) {
-      return Response.json({ error: `API error: ${res.status} ${res.statusText}` }, { status: res.status });
+      const msg =
+        res.status === 403
+          ? '403 Forbidden — Make sure you are subscribed to the YouTube Media Downloader API on RapidAPI (free plan). Go to rapidapi.com → find the API → click Subscribe.'
+          : `API error: ${res.status} ${res.statusText}`;
+      return Response.json({ error: msg }, { status: res.status });
     }
 
     const data = await res.json();
