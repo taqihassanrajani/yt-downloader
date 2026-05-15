@@ -417,6 +417,91 @@ html, body {
   font-family: var(--mono);
 }
 
+/* Section label flex */
+.section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.info-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+.info-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+.merge-hint {
+  margin: 0 12px 10px;
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.83rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+.merge-hint a { color: #60a5fa; text-decoration: none; }
+.merge-hint a:hover { text-decoration: underline; }
+.merge-hint strong { color: var(--text); }
+.merge-hint em { color: var(--text-dim); }
+
+.hq-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.hq-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.quality-badge {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(255,45,45,0.25);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 2px 8px;
+}
+.hq-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+.hq-row { display: flex; flex-direction: column; }
+.hq-item {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.hq-item:last-child { border-bottom: none !important; }
+
+.audio-dl:hover {
+  background: rgba(59,130,246,0.12) !important;
+  border-color: var(--blue) !important;
+  color: var(--blue) !important;
+}
+
 /* Responsive */
 @media (max-width: 520px) {
   .video-info {
