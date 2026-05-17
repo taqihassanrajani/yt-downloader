@@ -48,12 +48,11 @@ export default function Home() {
   }
 
   // Client-side merge with ffmpeg.wasm (no server, no COEP headers needed with single-thread core)
-  async function handleMerge720p(videoUrl, audioUrl, title) {
+ async function handleMerge720p(videoUrl, audioUrl, title) {
   setError('');
   setMergeState({ active: true, progress: 5, label: 'Loading ffmpeg…' });
   try {
     const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-    const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
 
     if (!ffmpegRef.current) {
       const ff = new FFmpeg();
@@ -66,26 +65,25 @@ export default function Home() {
         }));
       });
 
-      // Single-threaded core — no SharedArrayBuffer needed
-      const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+      // Load directly from CDN — no toBlobURL, avoids Next.js blob module error
       await ff.load({
-        coreURL:  await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
-        wasmURL:  await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+        coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
       });
       ffmpegRef.current = ff;
     }
 
     const ff = ffmpegRef.current;
-
-    // Use our proxy to avoid YouTube CORS restrictions
     const proxyVideo = `/api/proxy?url=${encodeURIComponent(videoUrl)}`;
     const proxyAudio = `/api/proxy?url=${encodeURIComponent(audioUrl)}`;
 
     setMergeState({ active: true, progress: 15, label: 'Downloading video…' });
-    await ff.writeFile('v.mp4', await fetchFile(proxyVideo));
+    const vRes = await fetch(proxyVideo);
+    await ff.writeFile('v.mp4', new Uint8Array(await vRes.arrayBuffer()));
 
-    setMergeState({ active: true, progress: 40, label: 'Downloading audio…' });
-    await ff.writeFile('a.m4a', await fetchFile(proxyAudio));
+    setMergeState({ active: true, progress: 42, label: 'Downloading audio…' });
+    const aRes = await fetch(proxyAudio);
+    await ff.writeFile('a.m4a', new Uint8Array(await aRes.arrayBuffer()));
 
     setMergeState({ active: true, progress: 52, label: 'Merging…' });
     await ff.exec(['-i', 'v.mp4', '-i', 'a.m4a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'out.mp4']);
@@ -109,7 +107,7 @@ export default function Home() {
 
   } catch (err) {
     console.error('Merge error:', err);
-    setError('Merge failed: ' + (err?.message || String(err) || 'Unknown error — check browser console'));
+    setError('Merge failed: ' + (err?.message || String(err)));
     setMergeState({ active: false, progress: 0, label: '' });
   }
 }
