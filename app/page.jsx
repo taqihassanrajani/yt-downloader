@@ -49,56 +49,70 @@ export default function Home() {
 
   // Client-side merge with ffmpeg.wasm (no server, no COEP headers needed with single-thread core)
   async function handleMerge720p(videoUrl, audioUrl, title) {
-    setMergeState({ active: true, progress: 5, label: 'Loading ffmpeg…' });
-    try {
-      const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-      const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
+  setError('');
+  setMergeState({ active: true, progress: 5, label: 'Loading ffmpeg…' });
+  try {
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+    const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
 
-      if (!ffmpegRef.current) {
-        const ff = new FFmpeg();
-        ff.on('progress', ({ progress }) => {
-          setMergeState(s => ({ ...s, progress: Math.min(95, 50 + Math.round(progress * 45)), label: 'Merging…' }));
-        });
-        // Single-threaded core — no SharedArrayBuffer / COEP needed
-        const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-        await ff.load({
-          coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
-        });
-        ffmpegRef.current = ff;
-      }
+    if (!ffmpegRef.current) {
+      const ff = new FFmpeg();
+      ff.on('log', ({ message }) => console.log('[ffmpeg]', message));
+      ff.on('progress', ({ progress }) => {
+        setMergeState(s => ({
+          ...s,
+          progress: Math.min(95, 50 + Math.round(progress * 45)),
+          label: 'Merging…',
+        }));
+      });
 
-      const ff = ffmpegRef.current;
-      setMergeState({ active: true, progress: 20, label: 'Downloading video…' });
-      await ff.writeFile('v.mp4', await fetchFile(videoUrl));
-
-      setMergeState({ active: true, progress: 40, label: 'Downloading audio…' });
-      await ff.writeFile('a.m4a', await fetchFile(audioUrl));
-
-      setMergeState({ active: true, progress: 50, label: 'Merging…' });
-      await ff.exec(['-i', 'v.mp4', '-i', 'a.m4a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'out.mp4']);
-
-      setMergeState({ active: true, progress: 97, label: 'Preparing download…' });
-      const fileData = await ff.readFile('out.mp4');
-      const blob = new Blob([fileData.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(title || 'video').slice(0, 60)}-720p.mp4`;
-      a.click();
-      URL.revokeObjectURL(url);
-      // Cleanup
-      await ff.deleteFile('v.mp4').catch(() => {});
-      await ff.deleteFile('a.m4a').catch(() => {});
-      await ff.deleteFile('out.mp4').catch(() => {});
-
-      setMergeState({ active: true, progress: 100, label: 'Done!' });
-      setTimeout(() => setMergeState({ active: false, progress: 0, label: '' }), 2000);
-    } catch (err) {
-      setError('Merge failed: ' + err.message);
-      setMergeState({ active: false, progress: 0, label: '' });
+      // Single-threaded core — no SharedArrayBuffer needed
+      const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+      await ff.load({
+        coreURL:  await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
+        wasmURL:  await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+      ffmpegRef.current = ff;
     }
+
+    const ff = ffmpegRef.current;
+
+    // Use our proxy to avoid YouTube CORS restrictions
+    const proxyVideo = `/api/proxy?url=${encodeURIComponent(videoUrl)}`;
+    const proxyAudio = `/api/proxy?url=${encodeURIComponent(audioUrl)}`;
+
+    setMergeState({ active: true, progress: 15, label: 'Downloading video…' });
+    await ff.writeFile('v.mp4', await fetchFile(proxyVideo));
+
+    setMergeState({ active: true, progress: 40, label: 'Downloading audio…' });
+    await ff.writeFile('a.m4a', await fetchFile(proxyAudio));
+
+    setMergeState({ active: true, progress: 52, label: 'Merging…' });
+    await ff.exec(['-i', 'v.mp4', '-i', 'a.m4a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'out.mp4']);
+
+    setMergeState({ active: true, progress: 97, label: 'Preparing download…' });
+    const fileData = await ff.readFile('out.mp4');
+    const blob = new Blob([fileData.buffer], { type: 'video/mp4' });
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.download = `${(title || 'video').slice(0, 60)}-720p.mp4`;
+    a.click();
+    URL.revokeObjectURL(dlUrl);
+
+    await ff.deleteFile('v.mp4').catch(() => {});
+    await ff.deleteFile('a.m4a').catch(() => {});
+    await ff.deleteFile('out.mp4').catch(() => {});
+
+    setMergeState({ active: true, progress: 100, label: 'Done! ✓' });
+    setTimeout(() => setMergeState({ active: false, progress: 0, label: '' }), 2500);
+
+  } catch (err) {
+    console.error('Merge error:', err);
+    setError('Merge failed: ' + (err?.message || String(err) || 'Unknown error — check browser console'));
+    setMergeState({ active: false, progress: 0, label: '' });
   }
+}
 
   const video720 = result?.videos?.find(v => v.quality === '720p');
   const video360 = result?.videos?.find(v => v.quality === '360p');
